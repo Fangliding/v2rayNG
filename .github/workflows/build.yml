@@ -1,0 +1,59 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      
+    - name: Setup Java
+      uses: actions/setup-java@v2
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Setup Golang
+      uses: actions/setup-go@v2
+      with:
+        go-version: '1.19.11'
+        
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: 1.48.0
+        override: true
+
+    - name: Setup Android SDK and NDK
+      uses: malinskiy/action-android/install-sdk@v0.1.2
+      with:
+        api-level: 30
+        ndk-version: '22.1.7171670'
+        target-platform: 'x86_64'
+
+    - name: Build dependencies
+      run: |
+        mkdir ${{ github.workspace }}/build
+        cd ${{ github.workspace }}/build
+        git clone --depth=1 -b main https://github.com/2dust/AndroidLibXrayLite.git
+        git clone --depth=1 -b master https://github.com/2dust/v2rayNG.git
+        cd AndroidLibXrayLite
+        gomobile init
+        go mod tidy -v
+        gomobile bind -v -androidapi 19 -ldflags='-s -w' ./
+        cp *.aar ../v2rayNG/V2rayNG/app/libs/
+
+    - name: Build APK
+      run: |
+        cd ${{ github.workspace }}/build/v2rayNG/V2rayNG
+        ./gradlew assembleRelease
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v2
+      with:
+        name: apk
+        path: ${{ github.workspace }}/build/v2rayNG/V2rayNG/app/build/outputs/apk/release/
