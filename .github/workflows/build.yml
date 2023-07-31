@@ -34,12 +34,6 @@ jobs:
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
 
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: 1.48.0
-        override: true
-
     - name: Setup Android environment
       uses: android-actions/setup-android@v2
       with:
@@ -70,4 +64,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: apk
-        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/dev/debug/
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/debug/
