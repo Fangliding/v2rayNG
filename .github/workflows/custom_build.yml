@@ -1,0 +1,134 @@
+name: Custom Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_core:
+        description: 'Replacement for xray-core (e.g., github.com/user/xray-core@hash)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3.2.0
+      with:
+        log-accepted-android-sdk-licenses: false
+        cmdline-tools-version: '13114758'
+        packages: 'platforms;android-36.1 build-tools;36.1.0 platform-tools'
+
+    # Setup Go environment for compiling AndroidLibXrayLite
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Install gomobile
+      run: |
+        go install golang.org/x/mobile/cmd/gomobile@latest
+        gomobile init
+
+    - name: Build AndroidLibXrayLite
+      run: |
+        cd AndroidLibXrayLite
+        
+        # Apply go replace if requested
+        if [ ! -z "${{ github.event.inputs.custom_core }}" ]; then
+          echo "Run replacement: go mod edit -replace github.com/xtls/xray-core=${{ github.event.inputs.custom_core }}"
+          go mod edit -replace github.com/xtls/xray-core=${{ github.event.inputs.custom_core }}
+        fi
+        
+        # Tidy and download dependencies
+        go mod tidy
+        
+        # Build the AAR (compile from source)
+        echo "Building libv2ray.aar..."
+        gomobile bind -target=android -androidapi 24 -ldflags='-s -w' -o libv2ray.aar .
+        
+        # Move to the expected location
+        mkdir -p ../V2rayNG/app/libs/
+        cp libv2ray.aar ../V2rayNG/app/libs/
+        echo "libv2ray.aar built and copied."
+
+    - name: Install NDK
+      run: |
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          --channel=0 \
+          --install "ndk;28.2.13676358"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> $GITHUB_ENV
+        sed -i '10i\
+        \
+            ndkVersion = "28.2.13676358"' ${{ github.workspace }}/V2rayNG/app/build.gradle.kts
+
+    - name: Restore cached libhevtun
+      id: cache-libhevtun-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/libs
+        key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+    - name: Build libhevtun
+      if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+      run: |
+        bash compile-hevtun.sh
+    
+    - name: Save libhevtun
+      if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/libs
+        key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+    - name: Copy libhevtun
+      run: |
+        cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+    - name: Setup Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Change Package Name
+      run: |
+        # Replace the applicationId with the custom one
+        sed -i 's/applicationId = "com.v2ray.ang"/applicationId = "com.v2ray.ang.test"/' V2rayNG/app/build.gradle.kts
+        echo "Package name changed to com.v2ray.ang.test"
+
+    - name: Build APK (Debug)
+      run: |
+        cd ${{ github.workspace }}/V2rayNG
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
+        chmod 755 gradlew
+        ./gradlew assembleDebug
+    
+    - name: Upload arm64-v8a APK
+      uses: actions/upload-artifact@v6
+      if: ${{  success() }}
+      with:
+        name: custom-debug-arm64-v8a
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*arm64-v8a*.apk
+
+    - name: Upload armeabi-v7a APK
+      uses: actions/upload-artifact@v6
+      if: ${{  success() }}
+      with:
+        name: custom-debug-armeabi-v7a
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*armeabi-v7a*.apk
+
+    - name: Upload x86 APK
+      uses: actions/upload-artifact@v6
+      if: ${{  success() }}
+      with:
+        name: custom-debug-x86-apk
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*x86*.apk
