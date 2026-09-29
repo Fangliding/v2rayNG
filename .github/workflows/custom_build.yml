@@ -58,7 +58,10 @@ jobs:
         
         # Build the AAR (compile from source)
         echo "Building libv2ray.aar..."
-        gomobile bind -target=android -androidapi 24 -ldflags='-s -w' -o libv2ray.aar .
+        gomobile bind \
+          -target=android -androidapi 24 \
+          -ldflags='-s -w -checklinkname=0' \
+          -o libv2ray.aar .
         
         # Move to the expected location
         mkdir -p ../V2rayNG/app/libs/
